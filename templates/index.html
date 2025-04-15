@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Home - Personal Finance Manager{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 text-center">
+        <h1 class="display-4 mb-4">Welcome to Personal Finance Manager</h1>
+        <p class="lead mb-5">Take control of your finances with our easy-to-use expense tracking tool.</p>
+        
+        {% if current_user.is_authenticated %}
+            <div class="d-grid gap-2 d-sm-flex justify-content-sm-center">
+                <a href="{{ url_for('transactions') }}" class="btn btn-primary btn-lg px-4 gap-3">
+                    <i class="fas fa-exchange-alt me-2"></i>View Transactions
+                </a>
+            </div>
+        {% else %}
+            <div class="d-grid gap-3 d-sm-flex justify-content-sm-center">
+                <a href="{{ url_for('login') }}" class="btn btn-primary btn-lg px-4 gap-3">
+                    <i class="fas fa-sign-in-alt me-2"></i>Login
+                </a>
+                <a href="{{ url_for('register_page') }}" class="btn btn-outline-primary btn-lg px-4">
+                    <i class="fas fa-user-plus me-2"></i>Register
+                </a>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row mt-5">
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <i class="fas fa-chart-pie fa-3x text-primary mb-3"></i>
+                <h3 class="card-title">Track Expenses</h3>
+                <p class="card-text">Easily record and categorize your income and expenses to get a clear picture of your financial health.</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <i class="fas fa-chart-line fa-3x text-success mb-3"></i>
+                <h3 class="card-title">Visualize Data</h3>
+                <p class="card-text">View charts and reports to understand your spending patterns and identify areas for improvement.</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body text-center">
+                <i class="fas fa-piggy-bank fa-3x text-info mb-3"></i>
+                <h3 class="card-title">Save Money</h3>
+                <p class="card-text">Set budgets, track your savings goals, and make informed financial decisions to build wealth.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 
