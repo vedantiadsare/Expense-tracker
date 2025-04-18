@@ -3,42 +3,70 @@
 {% block title %}Profile - Personal Finance Manager{% endblock %}
 
 {% block content %}
-<div class="container py-4">
-    <div class="row">
-        <div class="col-md-8 mx-auto">
-            <div class="card shadow-sm">
-                <div class="card-header bg-white">
-                    <h4 class="mb-0">Your Profile</h4>
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h3 class="mb-0">Your Profile</h3>
+                    <button class="btn btn-primary" id="editProfileBtn">
+                        <i class="fas fa-edit"></i> Edit Profile
+                    </button>
                 </div>
                 <div class="card-body">
-                    <div class="row mb-4">
-                        <div class="col-md-4 text-center">
-                            <div class="avatar-circle mb-3">
-                                <span class="initials">{{ user.username[0]|upper }}</span>
+                    <!-- View Profile Section -->
+                    <div id="viewProfile">
+                        <div class="row mb-4">
+                            <div class="col-md-4 text-center">
+                                <div class="avatar-circle mb-3">
+                                    <span class="initials">{{ user.username[0]|upper }}</span>
+                                </div>
+                                <h5>{{ user.username }}</h5>
+                                <p class="text-muted">Member since {{ user.created_at.strftime('%B %Y') }}</p>
                             </div>
-                            <h5>{{ user.username }}</h5>
-                            <p class="text-muted">Member since {{ user.created_at.strftime('%B %Y') }}</p>
-                        </div>
-                        <div class="col-md-8">
-                            <div class="mb-3">
-                                <label class="form-label text-muted">Username</label>
-                                <p class="form-control-static">{{ user.username }}</p>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label text-muted">Email</label>
-                                <p class="form-control-static">{{ user.email }}</p>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label text-muted">Account Created</label>
-                                <p class="form-control-static">{{ user.created_at.strftime('%B %d, %Y') }}</p>
+                            <div class="col-md-8">
+                                <div class="mb-3">
+                                    <label class="form-label text-muted">Username</label>
+                                    <p class="form-control-static">{{ user.username }}</p>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label text-muted">Email</label>
+                                    <p class="form-control-static">{{ user.email }}</p>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label text-muted">Account Created</label>
+                                    <p class="form-control-static">{{ user.created_at.strftime('%B %d, %Y') }}</p>
+                                </div>
                             </div>
                         </div>
                     </div>
-                    
-                    <div class="text-center mt-4">
-                        <a href="{{ url_for('transactions') }}" class="btn btn-primary">
-                            <i class="fas fa-exchange-alt me-2"></i>View Transactions
-                        </a>
+
+                    <!-- Edit Profile Form (Hidden by default) -->
+                    <div id="editProfile" style="display: none;">
+                        <form method="POST" action="{{ url_for('profile') }}">
+                            <div class="mb-3">
+                                <label for="username" class="form-label">Username</label>
+                                <input type="text" class="form-control" id="username" name="username" value="{{ user.username }}" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="email" class="form-label">Email</label>
+                                <input type="email" class="form-control" id="email" name="email" value="{{ user.email }}" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="current_password" class="form-label">Current Password</label>
+                                <input type="password" class="form-control" id="current_password" name="current_password" required>
+                                <small class="text-muted">Required to make any changes</small>
+                            </div>
+                            <div class="mb-3">
+                                <label for="new_password" class="form-label">New Password</label>
+                                <input type="password" class="form-control" id="new_password" name="new_password">
+                                <small class="text-muted">Leave blank to keep current password</small>
+                            </div>
+                            <div class="d-flex gap-2">
+                                <button type="submit" class="btn btn-primary">Save Changes</button>
+                                <button type="button" class="btn btn-secondary" id="cancelEdit">Cancel</button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             </div>
@@ -73,4 +101,27 @@
         font-weight: 500;
     }
 </style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const editBtn = document.getElementById('editProfileBtn');
+        const cancelBtn = document.getElementById('cancelEdit');
+        const viewProfile = document.getElementById('viewProfile');
+        const editProfile = document.getElementById('editProfile');
+
+        editBtn.addEventListener('click', function() {
+            viewProfile.style.display = 'none';
+            editProfile.style.display = 'block';
+            editBtn.style.display = 'none';
+        });
+
+        cancelBtn.addEventListener('click', function() {
+            viewProfile.style.display = 'block';
+            editProfile.style.display = 'none';
+            editBtn.style.display = 'block';
+        });
+    });
+</script>
 {% endblock %} 

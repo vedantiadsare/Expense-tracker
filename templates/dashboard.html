@@ -20,8 +20,9 @@
     
     .chart-container {
         position: relative;
-        height: 300px;
+        height: 250px;
         width: 100%;
+        margin-bottom: 1rem;
     }
     
     .transaction-date {
@@ -31,62 +32,246 @@
     .category-badge {
         font-size: 0.8rem;
     }
+
+    .chart-card {
+        height: 100%;
+        margin-bottom: 1rem;
+        border: none;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        transition: transform 0.3s ease;
+    }
+
+    .chart-card:hover {
+        transform: translateY(-5px);
+    }
+
+    .chart-card .card-body {
+        display: flex;
+        flex-direction: column;
+        padding: 1.25rem;
+    }
+
+    .chart-wrapper {
+        flex-grow: 1;
+        position: relative;
+        height: 200px;
+    }
+    
+    .card-title {
+        font-size: 1.1rem;
+        margin-bottom: 0.75rem;
+        color: #2c3e50;
+        font-weight: 600;
+    }
+    
+    .table-responsive {
+        max-height: 200px;
+        overflow-y: auto;
+    }
+    
+    .table th {
+        position: sticky;
+        top: 0;
+        background-color: #f8f9fa;
+        z-index: 1;
+    }
+
+    .financial-advice {
+        background: linear-gradient(135deg, #6B73FF 0%, #000DFF 100%);
+        color: white;
+        padding: 1.5rem;
+        border-radius: 10px;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .financial-advice h5 {
+        color: white;
+        margin-bottom: 1rem;
+        font-weight: 600;
+    }
+
+    .advice-item {
+        margin-bottom: 0.75rem;
+        padding-left: 1.5rem;
+        position: relative;
+    }
+
+    .advice-item:before {
+        content: "•";
+        position: absolute;
+        left: 0;
+        color: rgba(255, 255, 255, 0.8);
+    }
+
+    .summary-card {
+        border: none;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        transition: transform 0.3s ease;
+    }
+
+    .summary-card:hover {
+        transform: translateY(-5px);
+    }
+
+    .summary-card .card-body {
+        padding: 1.25rem;
+    }
+
+    .summary-card .card-title {
+        font-size: 0.9rem;
+        margin-bottom: 0.5rem;
+        color: rgba(255, 255, 255, 0.9);
+    }
+
+    .summary-card .card-text {
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin-bottom: 0;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="container py-4">
-    <h1 class="mb-4">Dashboard</h1>
+<div class="container-fluid py-3">
+    <h1 class="mb-4">Financial Dashboard</h1>
     
     <!-- Summary Cards -->
     <div class="row mb-4">
-        <div class="col-md-4">
-            <div class="card bg-success text-white">
+        <div class="col-md-3">
+            <div class="card summary-card bg-success">
                 <div class="card-body">
                     <h5 class="card-title">Total Income</h5>
                     <h3 class="card-text">₹{{ "%.2f"|format(totals.total_income or 0) }}</h3>
                 </div>
             </div>
         </div>
-        <div class="col-md-4">
-            <div class="card bg-danger text-white">
+        <div class="col-md-3">
+            <div class="card summary-card bg-danger">
                 <div class="card-body">
                     <h5 class="card-title">Total Expenses</h5>
                     <h3 class="card-text">₹{{ "%.2f"|format(totals.total_expenses or 0) }}</h3>
                 </div>
             </div>
         </div>
-        <div class="col-md-4">
-            <div class="card {% if (totals.total_income or 0) - (totals.total_expenses or 0) >= 0 %}bg-primary{% else %}bg-warning{% endif %} text-white">
+        <div class="col-md-3">
+            <div class="card summary-card {% if (totals.total_income or 0) - (totals.total_expenses or 0) >= 0 %}bg-primary{% else %}bg-warning{% endif %}">
                 <div class="card-body">
                     <h5 class="card-title">Current Balance</h5>
                     <h3 class="card-text">₹{{ "%.2f"|format((totals.total_income or 0) - (totals.total_expenses or 0)) }}</h3>
                 </div>
             </div>
         </div>
-    </div>
-    
-    <!-- Monthly Chart -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card">
+        <div class="col-md-3">
+            <div class="card summary-card bg-info">
                 <div class="card-body">
-                    <h5 class="card-title">Monthly Overview</h5>
-                    <canvas id="monthlyChart"></canvas>
+                    <h5 class="card-title">Monthly Savings</h5>
+                    <h3 class="card-text">₹{{ "%.2f"|format(monthly_savings or 0) }}</h3>
                 </div>
             </div>
         </div>
     </div>
+
+    <!-- Financial Advice Section -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="financial-advice">
+                <h5><i class="fas fa-lightbulb me-2"></i>Financial Insights & Advice</h5>
+                {% set savings_rate = ((totals.total_income or 0) - (totals.total_expenses or 0)) / (totals.total_income or 1) * 100 %}
+                {% set highest_expense = expense_categories|sort(attribute='total')|last if expense_categories else None %}
+                
+                <div class="advice-item">
+                    {% if savings_rate >= 20 %}
+                        Great job! You're saving {{ "%.1f"|format(savings_rate) }}% of your income, which is above the recommended 20% savings rate.
+                    {% elif savings_rate >= 0 %}
+                        You're saving {{ "%.1f"|format(savings_rate) }}% of your income. Try to increase this to 20% for better financial security.
+                    {% else %}
+                        Your expenses exceed your income. Consider reviewing your budget to reduce spending.
+                    {% endif %}
+                </div>
+
+                {% if highest_expense %}
+                    <div class="advice-item">
+                        Your highest expense category is {{ highest_expense.name }} (₹{{ "%.2f"|format(highest_expense.total) }}). 
+                        Consider if this aligns with your financial priorities.
+                    </div>
+                {% endif %}
+
+                {% if monthly_savings < 0 %}
+                    <div class="advice-item">
+                        Your monthly savings are negative. Focus on reducing expenses or increasing income to improve your financial health.
+                    </div>
+                {% endif %}
+
+                {% if expense_categories|length > 5 %}
+                    <div class="advice-item">
+                        You have {{ expense_categories|length }} expense categories. Consider consolidating similar categories to simplify your budget.
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
     
-    <!-- Recent Transactions and Category Breakdown -->
+    <!-- Charts Row 1 -->
+    <div class="row mb-4">
+        <!-- Income vs Expenses Trend -->
+        <div class="col-md-6">
+            <div class="card chart-card">
+                <div class="card-body">
+                    <h5 class="card-title">Income vs Expenses Trend</h5>
+                    <div class="chart-wrapper">
+                        <canvas id="trendChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Expense Categories Pie Chart -->
+        <div class="col-md-6">
+            <div class="card chart-card">
+                <div class="card-body">
+                    <h5 class="card-title">Expense Categories</h5>
+                    <div class="chart-wrapper">
+                        <canvas id="expensePieChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts Row 2 -->
+    <div class="row mb-4">
+        <!-- Monthly Savings Bar Chart -->
+        <div class="col-md-6">
+            <div class="card chart-card">
+                <div class="card-body">
+                    <h5 class="card-title">Monthly Savings</h5>
+                    <div class="chart-wrapper">
+                        <canvas id="savingsChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Category-wise Spending Pattern -->
+        <div class="col-md-6">
+            <div class="card chart-card">
+                <div class="card-body">
+                    <h5 class="card-title">Category-wise Spending</h5>
+                    <div class="chart-wrapper">
+                        <canvas id="radarChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Transactions -->
     <div class="row">
-        <!-- Recent Transactions -->
-        <div class="col-md-6 mb-4">
-            <div class="card">
+        <div class="col-12">
+            <div class="card chart-card">
                 <div class="card-body">
                     <h5 class="card-title">Recent Transactions</h5>
                     <div class="table-responsive">
-                        <table class="table">
+                        <table class="table table-sm">
                             <thead>
                                 <tr>
                                     <th>Date</th>
@@ -110,63 +295,6 @@
                 </div>
             </div>
         </div>
-        
-        <!-- Category Breakdown -->
-        <div class="col-md-6 mb-4">
-            <div class="card">
-                <div class="card-body">
-                    <h5 class="card-title">Category Breakdown</h5>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <h6 class="text-success">Income Categories</h6>
-                            <div class="table-responsive">
-                                <table class="table table-sm">
-                                    <thead>
-                                        <tr>
-                                            <th>Category</th>
-                                            <th>Amount</th>
-                                            <th>%</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {% for category in income_categories %}
-                                        <tr>
-                                            <td>{{ category.name }}</td>
-                                            <td>₹{{ "%.2f"|format(category.total) }}</td>
-                                            <td>{{ category.percentage }}%</td>
-                                        </tr>
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <h6 class="text-danger">Expense Categories</h6>
-                            <div class="table-responsive">
-                                <table class="table table-sm">
-                                    <thead>
-                                        <tr>
-                                            <th>Category</th>
-                                            <th>Amount</th>
-                                            <th>%</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {% for category in expense_categories %}
-                                        <tr>
-                                            <td>{{ category.name }}</td>
-                                            <td>₹{{ "%.2f"|format(category.total) }}</td>
-                                            <td>{{ category.percentage }}%</td>
-                                        </tr>
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
     </div>
 </div>
 {% endblock %}
@@ -174,35 +302,264 @@
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-    // Monthly Chart
-    const monthlyData = {{ monthly_data|tojson }};
-    const labels = monthlyData.map(data => data.month);
-    const incomeData = monthlyData.map(data => data.income || 0);
-    const expenseData = monthlyData.map(data => data.expenses || 0);
-
-    new Chart(document.getElementById('monthlyChart'), {
-        type: 'bar',
+    // Get data from Flask template
+    const monthlyData = {{ monthly_data|tojson|safe }};
+    const expenseCategories = {{ expense_categories|tojson|safe }};
+    const incomeCategories = {{ income_categories|tojson|safe }};
+    
+    // Common chart options
+    const commonOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: {
+            duration: 2000,
+            easing: 'easeInOutQuart'
+        },
+        plugins: {
+            legend: {
+                position: 'bottom',
+                labels: {
+                    padding: 20,
+                    font: {
+                        size: 12
+                    }
+                }
+            }
+        }
+    };
+    
+    // Income vs Expenses Trend Chart
+    const trendCtx = document.getElementById('trendChart').getContext('2d');
+    new Chart(trendCtx, {
+        type: 'line',
         data: {
-            labels: labels,
+            labels: monthlyData.map(d => d.month),
+            datasets: [
+                {
+                    label: 'Income',
+                    data: monthlyData.map(d => d.income || 0),
+                    backgroundColor: 'rgba(40, 167, 69, 0.2)',
+                    borderColor: 'rgb(40, 167, 69)',
+                    borderWidth: 3,
+                    fill: true,
+                    tension: 0.4,
+                    pointBackgroundColor: 'rgb(40, 167, 69)',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                },
+                {
+                    label: 'Expenses',
+                    data: monthlyData.map(d => d.expenses || 0),
+                    backgroundColor: 'rgba(220, 53, 69, 0.2)',
+                    borderColor: 'rgb(220, 53, 69)',
+                    borderWidth: 3,
+                    fill: true,
+                    tension: 0.4,
+                    pointBackgroundColor: 'rgb(220, 53, 69)',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                }
+            ]
+        },
+        options: {
+            ...commonOptions,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: {
+                        color: 'rgba(0, 0, 0, 0.1)',
+                        drawBorder: false
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            return '₹' + value.toLocaleString();
+                        },
+                        padding: 10
+                    }
+                },
+                x: {
+                    grid: {
+                        display: false
+                    },
+                    ticks: {
+                        padding: 10
+                    }
+                }
+            },
+            plugins: {
+                ...commonOptions.plugins,
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    titleColor: '#fff',
+                    titleFont: {
+                        size: 14,
+                        weight: 'bold'
+                    },
+                    bodyFont: {
+                        size: 13
+                    },
+                    padding: 12,
+                    callbacks: {
+                        label: function(context) {
+                            return context.dataset.label + ': ₹' + context.raw.toLocaleString();
+                        }
+                    }
+                },
+                legend: {
+                    ...commonOptions.plugins.legend,
+                    labels: {
+                        ...commonOptions.plugins.legend.labels,
+                        usePointStyle: true,
+                        pointStyle: 'circle'
+                    }
+                }
+            },
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            }
+        }
+    });
+    
+    // Expense Categories Pie Chart
+    const pieCtx = document.getElementById('expensePieChart').getContext('2d');
+    new Chart(pieCtx, {
+        type: 'doughnut',
+        data: {
+            labels: expenseCategories.map(c => c.name),
             datasets: [{
-                label: 'Income',
-                data: incomeData,
-                backgroundColor: 'rgba(40, 167, 69, 0.5)',
-                borderColor: 'rgb(40, 167, 69)',
-                borderWidth: 1
-            }, {
-                label: 'Expenses',
-                data: expenseData,
-                backgroundColor: 'rgba(220, 53, 69, 0.5)',
-                borderColor: 'rgb(220, 53, 69)',
+                data: expenseCategories.map(c => c.total || 0),
+                backgroundColor: [
+                    'rgba(255, 99, 132, 0.8)',
+                    'rgba(54, 162, 235, 0.8)',
+                    'rgba(255, 206, 86, 0.8)',
+                    'rgba(75, 192, 192, 0.8)',
+                    'rgba(153, 102, 255, 0.8)',
+                    'rgba(255, 159, 64, 0.8)',
+                    'rgba(199, 199, 199, 0.8)',
+                    'rgba(83, 102, 255, 0.8)',
+                    'rgba(255, 99, 132, 0.8)',
+                    'rgba(54, 162, 235, 0.8)'
+                ],
+                borderColor: [
+                    'rgb(255, 99, 132)',
+                    'rgb(54, 162, 235)',
+                    'rgb(255, 206, 86)',
+                    'rgb(75, 192, 192)',
+                    'rgb(153, 102, 255)',
+                    'rgb(255, 159, 64)',
+                    'rgb(199, 199, 199)',
+                    'rgb(83, 102, 255)',
+                    'rgb(255, 99, 132)',
+                    'rgb(54, 162, 235)'
+                ],
                 borderWidth: 1
             }]
         },
         options: {
-            responsive: true,
+            ...commonOptions,
+            plugins: {
+                ...commonOptions.plugins,
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const value = context.raw || 0;
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = ((value / total) * 100).toFixed(1);
+                            return `${context.label}: ₹${value.toLocaleString()} (${percentage}%)`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    
+    // Monthly Savings Chart
+    const savingsCtx = document.getElementById('savingsChart').getContext('2d');
+    new Chart(savingsCtx, {
+        type: 'bar',
+        data: {
+            labels: monthlyData.map(d => d.month),
+            datasets: [{
+                label: 'Savings',
+                data: monthlyData.map(d => (d.income || 0) - (d.expenses || 0)),
+                backgroundColor: function(context) {
+                    const value = context.raw || 0;
+                    return value >= 0 ? 'rgba(40, 167, 69, 0.8)' : 'rgba(220, 53, 69, 0.8)';
+                },
+                borderColor: function(context) {
+                    const value = context.raw || 0;
+                    return value >= 0 ? 'rgb(40, 167, 69)' : 'rgb(220, 53, 69)';
+                },
+                borderWidth: 1,
+                borderRadius: 5
+            }]
+        },
+        options: {
+            ...commonOptions,
             scales: {
                 y: {
-                    beginAtZero: true
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return '₹' + value.toLocaleString();
+                        }
+                    }
+                }
+            },
+            plugins: {
+                ...commonOptions.plugins,
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return 'Savings: ₹' + context.raw.toLocaleString();
+                        }
+                    }
+                }
+            }
+        }
+    });
+    
+    // Category-wise Spending Pattern Chart
+    const radarCtx = document.getElementById('radarChart').getContext('2d');
+    new Chart(radarCtx, {
+        type: 'bar',
+        data: {
+            labels: expenseCategories.map(c => c.name),
+            datasets: [{
+                label: 'Expenses',
+                data: expenseCategories.map(c => c.total || 0),
+                backgroundColor: 'rgba(220, 53, 69, 0.8)',
+                borderColor: 'rgb(220, 53, 69)',
+                borderWidth: 1,
+                borderRadius: 5
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            ...commonOptions,
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return '₹' + value.toLocaleString();
+                        }
+                    }
+                }
+            },
+            plugins: {
+                ...commonOptions.plugins,
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return '₹' + context.raw.toLocaleString();
+                        }
+                    }
                 }
             }
         }

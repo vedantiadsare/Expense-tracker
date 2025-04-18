@@ -6,9 +6,11 @@
 <div class="container mt-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1>Transactions</h1>
-        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#transactionModal">
-            <i class="fas fa-plus"></i> Add Transaction
-        </button>
+        <div>
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#transactionModal">
+                <i class="fas fa-plus"></i> Add Transaction
+            </button>
+        </div>
     </div>
 
     {% if transactions %}
@@ -109,11 +111,20 @@
                         <label for="category_id" class="form-label">Category</label>
                         <select class="form-select" id="category_id" name="category_id" required>
                             <option value="">Select a category</option>
+                            <optgroup label="Income Categories" id="income-categories">
                             {% for category in categories %}
-                            <option value="{{ category.id }}" data-type="{{ category.type }}" class="category-option">
-                                {{ category.name }}
-                            </option>
+                                {% if category.type == 'income' %}
+                                <option value="{{ category.id }}" data-type="income">{{ category.name }}</option>
+                                {% endif %}
                             {% endfor %}
+                            </optgroup>
+                            <optgroup label="Expense Categories" id="expense-categories">
+                            {% for category in categories %}
+                                {% if category.type == 'expense' %}
+                                <option value="{{ category.id }}" data-type="expense">{{ category.name }}</option>
+                                {% endif %}
+                            {% endfor %}
+                            </optgroup>
                         </select>
                     </div>
                 </div>
@@ -125,97 +136,100 @@
         </div>
     </div>
 </div>
-{% endblock %}
 
-{% block extra_js %}
+{% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Set default date to today
-    document.getElementById('date').valueAsDate = new Date();
-    
-    // Function to update category options based on transaction type
-    function updateCategoryOptions() {
-        const selectedType = document.getElementById('transaction_type').value;
-        const categoryOptions = document.querySelectorAll('.category-option');
-        
-        categoryOptions.forEach(option => {
-            if (selectedType === '' || option.dataset.type === selectedType) {
-                option.style.display = '';
-            } else {
+    const transactionModal = document.getElementById('transactionModal');
+    const transactionForm = document.getElementById('transactionForm');
+    const transactionType = document.getElementById('transaction_type');
+    const categorySelect = document.getElementById('category_id');
+    const incomeCategories = document.getElementById('income-categories');
+    const expenseCategories = document.getElementById('expense-categories');
+
+    // Function to filter categories based on transaction type
+    function filterCategories(type) {
+        // Hide all options first
+        Array.from(categorySelect.options).forEach(option => {
+            if (option.value !== '') {
                 option.style.display = 'none';
             }
         });
-        
-        // Reset category selection if current selection doesn't match type
-        const categorySelect = document.getElementById('category_id');
-        const selectedOption = categorySelect.options[categorySelect.selectedIndex];
-        if (selectedOption && selectedOption.dataset.type !== selectedType) {
-            categorySelect.value = '';
+
+        // Show only relevant options
+        if (type === 'income') {
+            Array.from(incomeCategories.getElementsByTagName('option')).forEach(option => {
+                option.style.display = '';
+            });
+            expenseCategories.style.display = 'none';
+            incomeCategories.style.display = '';
+        } else if (type === 'expense') {
+            Array.from(expenseCategories.getElementsByTagName('option')).forEach(option => {
+                option.style.display = '';
+            });
+            incomeCategories.style.display = 'none';
+            expenseCategories.style.display = '';
+        } else {
+            incomeCategories.style.display = 'none';
+            expenseCategories.style.display = 'none';
         }
+
+        // Reset category selection
+        categorySelect.value = '';
     }
-    
-    // Add event listener for transaction type changes
-    document.getElementById('transaction_type').addEventListener('change', updateCategoryOptions);
-    
-    // Handle edit button clicks
+
+    // Event listener for transaction type change
+    transactionType.addEventListener('change', function() {
+        filterCategories(this.value);
+    });
+
+    // Event listener for edit transaction buttons
     document.querySelectorAll('.edit-transaction').forEach(button => {
-        button.addEventListener('click', async function() {
+        button.addEventListener('click', function() {
             const transactionId = this.dataset.transactionId;
-            try {
-                const response = await fetch(`/api/transactions/${transactionId}`);
-                const transaction = await response.json();
-                
-                if (response.ok) {
-                    document.getElementById('transaction_id').value = transaction.id;
-                    document.getElementById('transaction_type').value = transaction.type;
-                    document.getElementById('amount').value = transaction.amount;
-                    document.getElementById('description').value = transaction.description;
-                    document.getElementById('date').value = transaction.date;
-                    document.getElementById('category_id').value = transaction.category_id;
+            fetch(`/api/transactions/${transactionId}`)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('transaction_id').value = data.id;
+                    document.getElementById('amount').value = data.amount;
+                    document.getElementById('description').value = data.description;
+                    document.getElementById('date').value = data.date;
+                    document.getElementById('transaction_type').value = data.category_type;
+                    filterCategories(data.category_type);
+                    document.getElementById('category_id').value = data.category_id;
                     document.getElementById('transactionModalTitle').textContent = 'Edit Transaction';
-                    
-                    // Update category options based on transaction type
-                    updateCategoryOptions();
-                } else {
-                    alert('Error loading transaction details');
-                }
-            } catch (error) {
-                console.error('Error:', error);
-                alert('Error loading transaction details');
-            }
+                });
         });
     });
-    
-    // Handle delete button clicks
+
+    // Event listener for delete transaction buttons
     document.querySelectorAll('.delete-transaction').forEach(button => {
-        button.addEventListener('click', async function() {
+        button.addEventListener('click', function() {
             if (confirm('Are you sure you want to delete this transaction?')) {
                 const transactionId = this.dataset.transactionId;
-                try {
-                    const response = await fetch(`/api/transactions/${transactionId}`, {
-                        method: 'DELETE'
+                fetch(`/api/transactions/${transactionId}`, { method: 'DELETE' })
+                    .then(response => {
+                        if (response.ok) {
+                            window.location.reload();
+                        } else {
+                            alert('Error deleting transaction');
+                        }
                     });
-                    
-                    if (response.ok) {
-                        window.location.reload();
-                    } else {
-                        alert('Error deleting transaction');
-                    }
-                } catch (error) {
-                    console.error('Error:', error);
-                    alert('Error deleting transaction');
-                }
             }
         });
     });
-    
+
     // Reset form when modal is closed
-    document.getElementById('transactionModal').addEventListener('hidden.bs.modal', function() {
-        document.getElementById('transactionForm').reset();
+    transactionModal.addEventListener('hidden.bs.modal', function() {
+        transactionForm.reset();
         document.getElementById('transaction_id').value = '';
         document.getElementById('transactionModalTitle').textContent = 'Add Transaction';
-        updateCategoryOptions();
+        filterCategories('');
     });
+
+    // Initialize category visibility
+    filterCategories(transactionType.value);
 });
 </script>
+{% endblock %}
 {% endblock %} 

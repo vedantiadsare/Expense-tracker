@@ -1,12 +1,11 @@
 from flask import Flask, request, jsonify, render_template, redirect, url_for, flash
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_bcrypt import Bcrypt
-from flask_jwt_extended import JWTManager
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
 from dotenv import load_dotenv
-import sqlite3
-from functools import wraps
+import mysql.connector
+from mysql.connector import Error
 
 # Load environment variables
 load_dotenv()
@@ -15,79 +14,98 @@ app = Flask(__name__)
 
 # Configuration
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-here')
-app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'jwt-secret-key')
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
 app.config['DATABASE'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'finance.db')
 
 # Initialize extensions
 bcrypt = Bcrypt(app)
-jwt = JWTManager(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
 # Database connection function
+
+
 def get_db_connection():
     try:
-        connection = sqlite3.connect(app.config['DATABASE'])
-        connection.row_factory = sqlite3.Row
+        # Debug prints to check environment variables
+        print(f"DB_HOST: {os.getenv('DB_HOST')}")
+        print(f"DB_USER: {os.getenv('DB_USER')}")
+        print(f"DB_PASSWORD: {os.getenv('DB_PASSWORD')}")
+        print(f"DB_NAME: {os.getenv('DB_NAME')}")
+        
+        connection = mysql.connector.connect(
+            host=os.getenv('DB_HOST', 'localhost'),
+            user=os.getenv('DB_USER', 'root'),
+            password=os.getenv('DB_PASSWORD', ''),
+            database=os.getenv('DB_NAME', 'finance_db')
+        )
         return connection
-    except Exception as e:
-        print(f"Error connecting to SQLite: {e}")
+    except Error as e:
+        print(f"Error connecting to MySQL: {e}")
         return None
+
+
 
 # Initialize database
 def init_db():
-    connection = get_db_connection()
-    if connection:
-        try:
-            cursor = connection.cursor()
-            
-            # Create users table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE NOT NULL,
-                    email TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            # Create categories table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS categories (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    type TEXT NOT NULL,
-                    user_id INTEGER NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-                )
-            ''')
-            
-            # Create transactions table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS transactions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    amount REAL NOT NULL,
-                    description TEXT,
-                    date TIMESTAMP NOT NULL,
-                    user_id INTEGER NOT NULL,
-                    category_id INTEGER NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-                    FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE CASCADE
-                )
-            ''')
-            
-            connection.commit()
-            print("Database initialized successfully")
-        except Exception as e:
-            print(f"Error initializing database: {e}")
-        finally:
-            connection.close()
+    try:
+        connection = get_db_connection()
+        
+        if connection:
+            try:
+                cursor = connection.cursor()
+                
+                # Create users table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS users (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        username VARCHAR(255) UNIQUE NOT NULL,
+                        email VARCHAR(255) UNIQUE NOT NULL,
+                        password_hash VARCHAR(255) NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                # Create categories table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS categories (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        name VARCHAR(255) NOT NULL,
+                        type VARCHAR(50) NOT NULL,
+                        user_id INT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+                    )
+                ''')
+                
+                # Create transactions table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS transactions (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        amount DECIMAL(10, 2) NOT NULL,
+                        description TEXT,
+                        date DATE NOT NULL,
+                        user_id INT NOT NULL,
+                        category_id INT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+                        FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE CASCADE
+                    )
+                ''')
+                
+                connection.commit()
+                print("Database initialized successfully")
+            except Exception as e:
+                print(f"Error initializing database: {e}")
+            finally:
+                if 'cursor' in locals():
+                    cursor.close()
+                if connection:
+                    connection.close()
+    except Error as e:
+        print(f"Error connecting to MySQL: {e}")
+        return None
 
-# Initialize database on startup
+# Initialize database
 init_db()
 
 # User class for Flask-Login
@@ -104,14 +122,19 @@ def load_user(user_id):
     connection = get_db_connection()
     if connection:
         try:
-            cursor = connection.cursor()
-            cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+            cursor = connection.cursor(dictionary=True)
+            cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
             user_data = cursor.fetchone()
             
             if user_data:
-                return User(dict(user_data))
+                return User(user_data)
         except Exception as e:
             print(f"Error loading user: {e}")
+        finally:
+            if 'cursor' in locals():
+                cursor.close()
+            if connection:
+                connection.close()
     return None
 
 # Root route
@@ -132,19 +155,27 @@ def login():
         connection = get_db_connection()
         if connection:
             try:
-                cursor = connection.cursor()
-                cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+                cursor = connection.cursor(dictionary=True)
+                cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
                 user_data = cursor.fetchone()
                 
                 if user_data and bcrypt.check_password_hash(user_data['password_hash'], password):
-                    user = User(dict(user_data))
+                    user = User(user_data)
                     login_user(user)
                     flash('You have been logged in successfully!', 'success')
                     return redirect(url_for('transactions'))
+                else:
+                    flash('Invalid username or password', 'danger')
             except Exception as e:
                 print(f"Error during login: {e}")
-        
-        flash('Invalid username or password', 'danger')
+                flash('An error occurred during login. Please try again.', 'danger')
+            finally:
+                if 'cursor' in locals():
+                    cursor.close()
+                if connection:
+                    connection.close()
+        else:
+            flash('Database connection error. Please try again later.', 'danger')
     
     return render_template('login.html')
 
@@ -166,16 +197,16 @@ def register_page():
         connection = get_db_connection()
         if connection:
             try:
-                cursor = connection.cursor()
+                cursor = connection.cursor(dictionary=True)
                 
                 # Check if username exists
-                cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+                cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
                 if cursor.fetchone():
                     flash('Username already exists', 'danger')
                     return render_template('register.html')
                 
                 # Check if email exists
-                cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
+                cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
                 if cursor.fetchone():
                     flash('Email already exists', 'danger')
                     return render_template('register.html')
@@ -183,7 +214,7 @@ def register_page():
                 # Create new user
                 hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
                 cursor.execute(
-                    "INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
+                    "INSERT INTO users (username, email, password_hash, created_at) VALUES (%s, %s, %s, %s)",
                     (username, email, hashed_password, datetime.utcnow())
                 )
                 connection.commit()
@@ -192,129 +223,267 @@ def register_page():
                 user_id = cursor.lastrowid
                 
                 # Add default categories for the new user
-                default_income_categories = ['Salary', 'Freelance', 'Investments', 'Gifts']
-                default_expense_categories = ['Food', 'Transportation', 'Housing', 'Utilities', 'Entertainment', 'Shopping', 'Healthcare']
+                default_income_categories = [
+                    # Primary Income
+                    'Salary',
+                    'Business Income',
+                    'Freelance',
+                    'Rental Income',
+                    'Investment Income',
+                    'Interest Income',
+                    'Dividend Income',
+                    'Pension',
+                    'Social Security',
+                    'Other Income',
+                    
+                    # Additional Income Sources
+                    'Commission',
+                    'Tips',
+                    'Gifts',
+                    'Refunds',
+                    'Lottery/Gambling',
+                    'Insurance Claims',
+                    'Tax Refunds'
+                ]
+                
+                default_expense_categories = [
+                    # Housing & Utilities
+                    'Rent/Mortgage',
+                    'Property Tax',
+                    'Home Insurance',
+                    'Maintenance',
+                    'Furniture',
+                    'Utilities',
+                    'Internet',
+                    'Phone',
+                    'Cable TV',
+                    
+                    # Transportation
+                    'Car Payment',
+                    'Car Insurance',
+                    'Gas',
+                    'Public Transit',
+                    'Parking',
+                    'Car Maintenance',
+                    'Tolls',
+                    
+                    # Food & Dining
+                    'Groceries',
+                    'Restaurants',
+                    'Coffee Shops',
+                    'Fast Food',
+                    'Alcohol',
+                    'Food Delivery',
+                    
+                    # Healthcare
+                    'Health Insurance',
+                    'Doctor Visits',
+                    'Dentist',
+                    'Pharmacy',
+                    'Vision Care',
+                    'Medical Supplies',
+                    
+                    # Personal Care
+                    'Haircuts',
+                    'Cosmetics',
+                    'Spa/Massage',
+                    'Gym Membership',
+                    'Personal Care Products',
+                    
+                    # Education
+                    'Tuition',
+                    'Books',
+                    'Student Loans',
+                    'Courses',
+                    'School Supplies',
+                    
+                    # Entertainment
+                    'Movies',
+                    'Concerts',
+                    'Sports Events',
+                    'Streaming Services',
+                    'Games',
+                    'Hobbies',
+                    
+                    # Shopping
+                    'Clothing',
+                    'Electronics',
+                    'Home Goods',
+                    'Gifts',
+                    'Books',
+                    
+                    # Financial
+                    'Credit Card Payments',
+                    'Loan Payments',
+                    'Investments',
+                    'Savings',
+                    'Charitable Donations',
+                    
+                    # Travel
+                    'Airfare',
+                    'Hotels',
+                    'Vacation',
+                    'Travel Insurance',
+                    'Souvenirs',
+                    
+                    # Pets
+                    'Pet Food',
+                    'Veterinary',
+                    'Pet Supplies',
+                    'Pet Insurance',
+                    
+                    # Miscellaneous
+                    'Subscriptions',
+                    'Memberships',
+                    'Postage',
+                    'Bank Fees',
+                    'Other Expenses'
+                ]
                 
                 for category_name in default_income_categories:
                     cursor.execute(
-                        "INSERT INTO categories (name, type, user_id, created_at) VALUES (?, ?, ?, ?)",
+                        "INSERT INTO categories (name, type, user_id, created_at) VALUES (%s, %s, %s, %s)",
                         (category_name, 'income', user_id, datetime.utcnow())
                     )
                 
                 for category_name in default_expense_categories:
                     cursor.execute(
-                        "INSERT INTO categories (name, type, user_id, created_at) VALUES (?, ?, ?, ?)",
+                        "INSERT INTO categories (name, type, user_id, created_at) VALUES (%s, %s, %s, %s)",
                         (category_name, 'expense', user_id, datetime.utcnow())
                     )
                 
                 connection.commit()
-                
                 flash('Your account has been created! You can now log in.', 'success')
                 return redirect(url_for('login'))
             except Exception as e:
                 print(f"Error during registration: {e}")
                 flash('An error occurred during registration. Please try again.', 'danger')
+            finally:
+                if 'cursor' in locals():
+                    cursor.close()
+                if connection:
+                    connection.close()
+        else:
+            flash('Database connection error. Please try again later.', 'danger')
     
     return render_template('register.html')
 
 @app.route('/transactions', methods=['GET', 'POST'])
 @login_required
 def transactions():
-    print("Transactions route accessed")
+    connection = get_db_connection()
+    if connection:
+        try:
+            cursor = connection.cursor(dictionary=True)
+            
+            if request.method == 'POST':
+                amount = float(request.form['amount'])
+                description = request.form['description']
+                date = request.form['date']
+                category_id = int(request.form['category_id'])
+                
+                cursor.execute('''
+                    INSERT INTO transactions (amount, description, date, user_id, category_id)
+                    VALUES (%s, %s, %s, %s, %s)
+                ''', (amount, description, date, current_user.id, category_id))
+                
+                connection.commit()
+                flash('Transaction added successfully!', 'success')
+                return redirect(url_for('transactions'))
+            
+            # Get categories for the dropdown
+            cursor.execute('SELECT * FROM categories WHERE user_id = %s', (current_user.id,))
+            categories = cursor.fetchall()
+            
+            # Get transactions
+            cursor.execute('''
+                SELECT t.*, c.name as category_name, c.type as category_type
+                FROM transactions t
+                JOIN categories c ON t.category_id = c.id
+                WHERE t.user_id = %s
+                ORDER BY t.date DESC
+            ''', (current_user.id,))
+            transactions = cursor.fetchall()
+            
+            return render_template('transactions.html', transactions=transactions, categories=categories)
+            
+        except Exception as e:
+            print(f"Error in transactions route: {e}")
+            flash('An error occurred. Please try again.', 'error')
+            return redirect(url_for('dashboard'))
+        finally:
+            if 'cursor' in locals():
+                cursor.close()
+            if connection:
+                connection.close()
+    else:
+        flash('Database connection error. Please try again later.', 'error')
+        return redirect(url_for('dashboard'))
+
+@app.route('/notifications')
+@login_required
+def notifications():
     connection = get_db_connection()
     if not connection:
-        print("Database connection failed")
         flash('Database connection error', 'danger')
         return redirect(url_for('index'))
     
     try:
-        cursor = connection.cursor()
+        cursor = connection.cursor(dictionary=True)
         
-        if request.method == 'POST':
-            try:
-                # Handle transaction creation/update
-                transaction_id = request.form.get('transaction_id')
-                amount = float(request.form.get('amount'))
-                description = request.form.get('description')
-                date = datetime.strptime(request.form.get('date'), '%Y-%m-%d')
-                category_id = int(request.form.get('category_id'))
-                
-                # Get the category type
-                cursor.execute("SELECT type FROM categories WHERE id = ? AND user_id = ?", 
-                             (category_id, current_user.id))
-                category = cursor.fetchone()
-                if not category:
-                    flash('Invalid category selected', 'danger')
-                    return redirect(url_for('transactions'))
-                
-                if transaction_id:  # Update existing transaction
-                    cursor.execute("""
-                        UPDATE transactions 
-                        SET amount = ?, description = ?, date = ?, category_id = ?
-                        WHERE id = ? AND user_id = ?
-                    """, (amount, description, date, category_id, transaction_id, current_user.id))
-                    flash('Transaction updated successfully!', 'success')
-                else:  # Create new transaction
-                    cursor.execute("""
-                        INSERT INTO transactions (amount, description, date, user_id, category_id, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """, (amount, description, date, current_user.id, category_id, datetime.utcnow()))
-                    flash('Transaction added successfully!', 'success')
-                
-                connection.commit()
-                return redirect(url_for('transactions'))
-            except Exception as e:
-                print(f"Error saving transaction: {e}")
-                flash('Error saving transaction. Please try again.', 'danger')
+        # Get all notifications for the user
+        cursor.execute("""
+            SELECT * FROM notifications
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+        """, (current_user.id,))
+        notifications_list = cursor.fetchall()
         
-        # Get all transactions
-        try:
-            print("Fetching transactions")
-            cursor.execute("""
-                SELECT t.*, c.name as category_name, c.type as category_type
-                FROM transactions t
-                JOIN categories c ON t.category_id = c.id
-                WHERE t.user_id = ?
-                ORDER BY t.date DESC
-            """, (current_user.id,))
-            transactions_list = cursor.fetchall()
-            
-            # Convert dates to proper format
-            for transaction in transactions_list:
-                if isinstance(transaction['date'], str):
-                    try:
-                        # Try to parse the date string to a datetime object
-                        transaction['date'] = datetime.strptime(transaction['date'], '%Y-%m-%d')
-                    except ValueError:
-                        # If parsing fails, keep it as a string
-                        pass
-            
-            print(f"Found {len(transactions_list)} transactions")
-        except Exception as e:
-            print(f"Error fetching transactions: {e}")
-            transactions_list = []
+        # Mark all notifications as read
+        cursor.execute("""
+            UPDATE notifications
+            SET is_read = TRUE
+            WHERE user_id = %s AND is_read = FALSE
+        """, (current_user.id,))
+        connection.commit()
         
-        # Get categories for dropdown
-        try:
-            print("Fetching categories")
-            cursor.execute("SELECT * FROM categories WHERE user_id = ? ORDER BY type, name", (current_user.id,))
-            categories = cursor.fetchall()
-            print(f"Found {len(categories)} categories")
-        except Exception as e:
-            print(f"Error fetching categories: {e}")
-            categories = []
-        
-        cursor.close()
-        connection.close()
-        
-        print("Rendering transactions template")
-        return render_template('transactions.html', transactions=transactions_list, categories=categories)
+        return render_template('notifications.html', notifications=notifications_list)
+    
     except Exception as e:
-        print(f"Error in transactions page: {e}")
-        import traceback
-        traceback.print_exc()
-        flash('Error loading transactions', 'danger')
+        print(f"Error in notifications page: {e}")
+        flash('Error loading notifications', 'danger')
         return redirect(url_for('index'))
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if connection:
+            connection.close()
+
+@app.route('/api/notifications/unread-count')
+@login_required
+def unread_notifications_count():
+    connection = get_db_connection()
+    if not connection:
+        return jsonify({'count': 0})
+    
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT COUNT(*) as count
+            FROM notifications
+            WHERE user_id = %s AND is_read = FALSE
+        """, (current_user.id,))
+        result = cursor.fetchone()
+        return jsonify({'count': result['count']})
+    
+    except Exception as e:
+        print(f"Error getting unread notifications count: {e}")
+        return jsonify({'count': 0})
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if connection:
+            connection.close()
 
 @app.route('/api/transactions/<int:transaction_id>', methods=['GET', 'DELETE'])
 @login_required
@@ -324,7 +493,7 @@ def transaction_api(transaction_id):
         return jsonify({'error': 'Database connection error'}), 500
     
     try:
-        cursor = connection.cursor()
+        cursor = connection.cursor(dictionary=True)
         
         if request.method == 'GET':
             # Get transaction details
@@ -332,7 +501,7 @@ def transaction_api(transaction_id):
                 SELECT t.*, c.name as category_name, c.type as category_type
                 FROM transactions t
                 JOIN categories c ON t.category_id = c.id
-                WHERE t.id = ? AND t.user_id = ?
+                WHERE t.id = %s AND t.user_id = %s
             """, (transaction_id, current_user.id))
             transaction = cursor.fetchone()
             
@@ -356,7 +525,7 @@ def transaction_api(transaction_id):
         
         elif request.method == 'DELETE':
             # Delete transaction
-            cursor.execute("DELETE FROM transactions WHERE id = ? AND user_id = ?", 
+            cursor.execute("DELETE FROM transactions WHERE id = %s AND user_id = %s", 
                          (transaction_id, current_user.id))
             connection.commit()
             return jsonify({'message': 'Transaction deleted successfully'})
@@ -365,8 +534,10 @@ def transaction_api(transaction_id):
         print(f"Error in transaction API: {e}")
         return jsonify({'error': str(e)}), 500
     finally:
-        cursor.close()
-        connection.close()
+        if 'cursor' in locals():
+            cursor.close()
+        if connection:
+            connection.close()
 
 @app.route('/categories', methods=['GET', 'POST'])
 @login_required
@@ -377,7 +548,7 @@ def categories():
         return redirect(url_for('index'))
     
     try:
-        cursor = connection.cursor()
+        cursor = connection.cursor(dictionary=True)
         
         if request.method == 'POST':
             # Handle category creation
@@ -385,7 +556,7 @@ def categories():
             category_type = request.form.get('type')
             
             cursor.execute(
-                "INSERT INTO categories (name, type, user_id, created_at) VALUES (?, ?, ?, ?)",
+                "INSERT INTO categories (name, type, user_id, created_at) VALUES (%s, %s, %s, %s)",
                 (name, category_type, current_user.id, datetime.utcnow())
             )
             connection.commit()
@@ -393,19 +564,21 @@ def categories():
             return redirect(url_for('categories'))
         
         # Get all categories
-        cursor.execute("SELECT * FROM categories WHERE user_id = ? ORDER BY type, name", (current_user.id,))
+        cursor.execute("SELECT * FROM categories WHERE user_id = %s ORDER BY type, name", (current_user.id,))
         categories_list = cursor.fetchall()
-        
-        cursor.close()
-        connection.close()
         
         return render_template('categories.html', categories=categories_list)
     except Exception as e:
         print(f"Error in categories page: {e}")
         flash('Error loading categories', 'danger')
         return redirect(url_for('transactions'))
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if connection:
+            connection.close()
 
-@app.route('/profile')
+@app.route('/profile', methods=['GET', 'POST'])
 @login_required
 def profile():
     connection = get_db_connection()
@@ -414,17 +587,79 @@ def profile():
         return redirect(url_for('index'))
     
     try:
-        cursor = connection.cursor()
-        cursor.execute("SELECT * FROM users WHERE id = ?", (current_user.id,))
-        user_data = cursor.fetchone()
-        cursor.close()
-        connection.close()
+        cursor = connection.cursor(dictionary=True)
         
-        return render_template('profile.html', user=dict(user_data))
+        if request.method == 'POST':
+            # Handle profile update
+            username = request.form.get('username')
+            email = request.form.get('email')
+            current_password = request.form.get('current_password')
+            new_password = request.form.get('new_password')
+            
+            # Verify current password
+            cursor.execute("SELECT password_hash FROM users WHERE id = %s", (current_user.id,))
+            user_data = cursor.fetchone()
+            
+            if not bcrypt.check_password_hash(user_data['password_hash'], current_password):
+                flash('Current password is incorrect', 'danger')
+                return redirect(url_for('profile'))
+            
+            # Update user information
+            update_fields = []
+            update_values = []
+            
+            if username and username != current_user.username:
+                # Check if username is already taken
+                cursor.execute("SELECT id FROM users WHERE username = %s AND id != %s", (username, current_user.id))
+                if cursor.fetchone():
+                    flash('Username is already taken', 'danger')
+                    return redirect(url_for('profile'))
+                update_fields.append("username = %s")
+                update_values.append(username)
+            
+            if email and email != current_user.email:
+                # Check if email is already taken
+                cursor.execute("SELECT id FROM users WHERE email = %s AND id != %s", (email, current_user.id))
+                if cursor.fetchone():
+                    flash('Email is already taken', 'danger')
+                    return redirect(url_for('profile'))
+                update_fields.append("email = %s")
+                update_values.append(email)
+            
+            if new_password:
+                update_fields.append("password_hash = %s")
+                update_values.append(bcrypt.generate_password_hash(new_password).decode('utf-8'))
+            
+            if update_fields:
+                update_values.append(current_user.id)
+                query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s"
+                cursor.execute(query, tuple(update_values))
+                connection.commit()
+                
+                # Update current user object
+                if username:
+                    current_user.username = username
+                if email:
+                    current_user.email = email
+                
+                flash('Profile updated successfully', 'success')
+                return redirect(url_for('profile'))
+        
+        # Get user data for display
+        cursor.execute("SELECT * FROM users WHERE id = %s", (current_user.id,))
+        user_data = cursor.fetchone()
+        
+        return render_template('profile.html', user=user_data)
+    
     except Exception as e:
-        print(f"Error loading profile: {e}")
-        flash('Error loading profile', 'danger')
-        return redirect(url_for('transactions'))
+        print(f"Error in profile page: {e}")
+        flash('Error updating profile', 'danger')
+        return redirect(url_for('profile'))
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if connection:
+            connection.close()
 
 @app.route('/logout')
 @login_required
@@ -442,16 +677,18 @@ def delete_transaction(transaction_id):
         return jsonify({'error': 'Database connection error'}), 500
     
     try:
-        cursor = connection.cursor()
-        cursor.execute("DELETE FROM transactions WHERE id = ? AND user_id = ?", (transaction_id, current_user.id))
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("DELETE FROM transactions WHERE id = %s AND user_id = %s", (transaction_id, current_user.id))
         connection.commit()
-        cursor.close()
-        connection.close()
-        
         return jsonify({'message': 'Transaction deleted successfully'}), 200
     except Exception as e:
         print(f"Error deleting transaction: {e}")
         return jsonify({'error': 'Error deleting transaction'}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if connection:
+            connection.close()
 
 @app.route('/api/categories/<int:category_id>', methods=['DELETE'])
 @login_required
@@ -461,114 +698,117 @@ def delete_category(category_id):
         return jsonify({'error': 'Database connection error'}), 500
     
     try:
-        cursor = connection.cursor()
-        cursor.execute("DELETE FROM categories WHERE id = ? AND user_id = ?", (category_id, current_user.id))
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("DELETE FROM categories WHERE id = %s AND user_id = %s", (category_id, current_user.id))
         connection.commit()
-        cursor.close()
-        connection.close()
-        
         return jsonify({'message': 'Category deleted successfully'}), 200
     except Exception as e:
         print(f"Error deleting category: {e}")
         return jsonify({'error': 'Error deleting category'}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if connection:
+            connection.close()
 
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Get total income and expenses
-        cursor.execute("""
-            SELECT 
-                SUM(CASE WHEN c.type = 'income' THEN t.amount ELSE 0 END) as total_income,
-                SUM(CASE WHEN c.type = 'expense' THEN t.amount ELSE 0 END) as total_expenses
-            FROM transactions t
-            JOIN categories c ON t.category_id = c.id
-            WHERE t.user_id = ?
-        """, (current_user.id,))
-        totals = dict(cursor.fetchone())
-        
-        # Get monthly data for chart
-        cursor.execute("""
-            SELECT 
-                strftime('%Y-%m', t.date) as month,
-                SUM(CASE WHEN c.type = 'income' THEN t.amount ELSE 0 END) as income,
-                SUM(CASE WHEN c.type = 'expense' THEN t.amount ELSE 0 END) as expenses
-            FROM transactions t
-            JOIN categories c ON t.category_id = c.id
-            WHERE t.user_id = ?
-            GROUP BY strftime('%Y-%m', t.date)
-            ORDER BY month DESC
-            LIMIT 12
-        """, (current_user.id,))
-        monthly_data = [dict(row) for row in cursor.fetchall()]
-        
-        # Get recent transactions
-        cursor.execute("""
-            SELECT t.*, c.name as category_name, c.type as type
-            FROM transactions t
-            JOIN categories c ON t.category_id = c.id
-            WHERE t.user_id = ?
-            ORDER BY t.date DESC
-            LIMIT 5
-        """, (current_user.id,))
-        recent_transactions = [dict(row) for row in cursor.fetchall()]
-        
-        # Get category breakdown
-        cursor.execute("""
-            SELECT 
-                c.name,
-                c.type,
-                SUM(t.amount) as total,
-                COUNT(*) as count
-            FROM transactions t
-            JOIN categories c ON t.category_id = c.id
-            WHERE t.user_id = ?
-            GROUP BY c.id, c.name, c.type
-            ORDER BY total DESC
-        """, (current_user.id,))
-        categories = [dict(row) for row in cursor.fetchall()]
-        
-        # Calculate category percentages
-        total_income = totals['total_income'] or 0
-        total_expenses = totals['total_expenses'] or 0
-        
-        income_categories = []
-        expense_categories = []
-        
-        for category in categories:
-            if category['type'] == 'income':
-                percentage = (category['total'] / total_income * 100) if total_income > 0 else 0
-                income_categories.append({
-                    'name': category['name'],
-                    'total': category['total'],
-                    'count': category['count'],
-                    'percentage': round(percentage, 1)
-                })
+    connection = get_db_connection()
+    if connection:
+        try:
+            cursor = connection.cursor(dictionary=True)
+            
+            # Get total income and expenses
+            cursor.execute('''
+                SELECT 
+                    SUM(CASE WHEN c.type = 'income' THEN t.amount ELSE 0 END) as total_income,
+                    SUM(CASE WHEN c.type = 'expense' THEN t.amount ELSE 0 END) as total_expenses
+                FROM transactions t
+                JOIN categories c ON t.category_id = c.id
+                WHERE t.user_id = %s
+            ''', (current_user.id,))
+            totals = cursor.fetchone()
+            
+            # Get monthly data for charts
+            cursor.execute('''
+                SELECT 
+                    DATE_FORMAT(t.date, '%%Y-%%m') as month,
+                    SUM(CASE WHEN c.type = 'income' THEN t.amount ELSE 0 END) as income,
+                    SUM(CASE WHEN c.type = 'expense' THEN t.amount ELSE 0 END) as expenses
+                FROM transactions t
+                JOIN categories c ON t.category_id = c.id
+                WHERE t.user_id = %s
+                GROUP BY DATE_FORMAT(t.date, '%%Y-%%m')
+                ORDER BY month DESC
+                LIMIT 12
+            ''', (current_user.id,))
+            monthly_data = cursor.fetchall()
+            
+            # Calculate monthly savings
+            if monthly_data:
+                latest_month = monthly_data[0]
+                monthly_savings = (latest_month.get('income', 0) or 0) - (latest_month.get('expenses', 0) or 0)
             else:
-                percentage = (category['total'] / total_expenses * 100) if total_expenses > 0 else 0
-                expense_categories.append({
-                    'name': category['name'],
-                    'total': category['total'],
-                    'count': category['count'],
-                    'percentage': round(percentage, 1)
-                })
-        
-        return render_template('dashboard.html',
-                             totals=totals,
-                             monthly_data=monthly_data,
-                             recent_transactions=recent_transactions,
-                             income_categories=income_categories,
-                             expense_categories=expense_categories)
-                             
-    except Exception as e:
-        flash(f'Error loading dashboard: {str(e)}', 'danger')
+                monthly_savings = 0
+            
+            # Get recent transactions
+            cursor.execute('''
+                SELECT t.*, c.name as category_name, c.type as category_type
+                FROM transactions t
+                JOIN categories c ON t.category_id = c.id
+                WHERE t.user_id = %s
+                ORDER BY t.date DESC
+                LIMIT 5
+            ''', (current_user.id,))
+            recent_transactions = cursor.fetchall()
+            
+            # Get category breakdown
+            cursor.execute('''
+                SELECT 
+                    c.name,
+                    c.type,
+                    SUM(t.amount) as total,
+                    COUNT(*) as count,
+                    (SUM(t.amount) / (
+                        SELECT SUM(amount) 
+                        FROM transactions t2 
+                        JOIN categories c2 ON t2.category_id = c2.id 
+                        WHERE t2.user_id = %s AND c2.type = c.type
+                    )) * 100 as percentage
+                FROM transactions t
+                JOIN categories c ON t.category_id = c.id
+                WHERE t.user_id = %s
+                GROUP BY c.id, c.name, c.type
+                HAVING total > 0
+                ORDER BY total DESC
+            ''', (current_user.id, current_user.id))
+            categories = cursor.fetchall()
+            
+            # Separate income and expense categories
+            income_categories = [c for c in categories if c['type'] == 'income']
+            expense_categories = [c for c in categories if c['type'] == 'expense']
+            
+            return render_template('dashboard.html',
+                                totals=totals,
+                                monthly_data=monthly_data,
+                                recent_transactions=recent_transactions,
+                                income_categories=income_categories,
+                                expense_categories=expense_categories,
+                                monthly_savings=monthly_savings)
+            
+        except Exception as e:
+            print(f"Error in dashboard route: {e}")
+            flash('An error occurred. Please try again.', 'error')
+            return redirect(url_for('index'))
+        finally:
+            if 'cursor' in locals():
+                cursor.close()
+            if connection:
+                connection.close()
+    else:
+        flash('Database connection error. Please try again later.', 'error')
         return redirect(url_for('index'))
-    finally:
-        if 'conn' in locals():
-            conn.close()
 
 if __name__ == '__main__':
     app.run(debug=True) 
