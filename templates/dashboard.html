@@ -303,9 +303,9 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     // Get data from Flask template
-    const monthlyData = {{ monthly_data|tojson|safe }};
-    const expenseCategories = {{ expense_categories|tojson|safe }};
-    const incomeCategories = {{ income_categories|tojson|safe }};
+    const monthlyData = JSON.parse('{{ monthly_data|tojson|safe }}');
+    const expenseCategories = JSON.parse('{{ expense_categories|tojson|safe }}');
+    const incomeCategories = JSON.parse('{{ income_categories|tojson|safe }}');
     
     // Common chart options
     const commonOptions = {
@@ -331,37 +331,29 @@
     // Income vs Expenses Trend Chart
     const trendCtx = document.getElementById('trendChart').getContext('2d');
     new Chart(trendCtx, {
-        type: 'line',
+        type: 'bar',
         data: {
             labels: monthlyData.map(d => d.month),
             datasets: [
                 {
                     label: 'Income',
                     data: monthlyData.map(d => d.income || 0),
-                    backgroundColor: 'rgba(40, 167, 69, 0.2)',
+                    backgroundColor: 'rgba(40, 167, 69, 0.8)',
                     borderColor: 'rgb(40, 167, 69)',
-                    borderWidth: 3,
-                    fill: true,
-                    tension: 0.4,
-                    pointBackgroundColor: 'rgb(40, 167, 69)',
-                    pointBorderColor: '#fff',
-                    pointBorderWidth: 2,
-                    pointRadius: 4,
-                    pointHoverRadius: 6
+                    borderWidth: 1,
+                    borderRadius: 5,
+                    barPercentage: 0.4,
+                    categoryPercentage: 0.8
                 },
                 {
                     label: 'Expenses',
                     data: monthlyData.map(d => d.expenses || 0),
-                    backgroundColor: 'rgba(220, 53, 69, 0.2)',
+                    backgroundColor: 'rgba(220, 53, 69, 0.8)',
                     borderColor: 'rgb(220, 53, 69)',
-                    borderWidth: 3,
-                    fill: true,
-                    tension: 0.4,
-                    pointBackgroundColor: 'rgb(220, 53, 69)',
-                    pointBorderColor: '#fff',
-                    pointBorderWidth: 2,
-                    pointRadius: 4,
-                    pointHoverRadius: 6
+                    borderWidth: 1,
+                    borderRadius: 5,
+                    barPercentage: 0.4,
+                    categoryPercentage: 0.8
                 }
             ]
         },
@@ -408,19 +400,7 @@
                             return context.dataset.label + ': ₹' + context.raw.toLocaleString();
                         }
                     }
-                },
-                legend: {
-                    ...commonOptions.plugins.legend,
-                    labels: {
-                        ...commonOptions.plugins.legend.labels,
-                        usePointStyle: true,
-                        pointStyle: 'circle'
-                    }
                 }
-            },
-            interaction: {
-                intersect: false,
-                mode: 'index'
             }
         }
     });

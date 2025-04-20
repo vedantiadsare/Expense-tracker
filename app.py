@@ -1,11 +1,12 @@
 from flask import Flask, request, jsonify, render_template, redirect, url_for, flash
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_bcrypt import Bcrypt
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 import mysql.connector
 from mysql.connector import Error
+import random
 
 # Load environment variables
 load_dotenv()
@@ -22,8 +23,6 @@ login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
 # Database connection function
-
-
 def get_db_connection():
     try:
         # Debug prints to check environment variables
@@ -43,67 +42,76 @@ def get_db_connection():
         print(f"Error connecting to MySQL: {e}")
         return None
 
-
-
 # Initialize database
 def init_db():
     try:
         connection = get_db_connection()
+        if not connection:
+            return None
+            
+        cursor = connection.cursor()
         
+        # Create users table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(255) UNIQUE NOT NULL,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Create categories table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS categories (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                type VARCHAR(50) NOT NULL,
+                user_id INT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # Create transactions table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS transactions (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                amount DECIMAL(10, 2) NOT NULL,
+                description TEXT,
+                date DATE NOT NULL,
+                user_id INT NOT NULL,
+                category_id INT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+                FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # Create budget_goals table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS budget_goals (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                category_id INT NOT NULL,
+                target_amount DECIMAL(10, 2) NOT NULL,
+                period VARCHAR(20) NOT NULL, -- 'daily', 'weekly', 'monthly', 'yearly'
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+                FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE CASCADE,
+                UNIQUE KEY unique_user_category_period (user_id, category_id, period)
+            )
+        ''')
+        
+        connection.commit()
+    except Exception as e:
+        print(f"Error initializing database: {e}")
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
         if connection:
-            try:
-                cursor = connection.cursor()
-                
-                # Create users table
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS users (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        username VARCHAR(255) UNIQUE NOT NULL,
-                        email VARCHAR(255) UNIQUE NOT NULL,
-                        password_hash VARCHAR(255) NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                ''')
-                
-                # Create categories table
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS categories (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        name VARCHAR(255) NOT NULL,
-                        type VARCHAR(50) NOT NULL,
-                        user_id INT NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-                    )
-                ''')
-                
-                # Create transactions table
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS transactions (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        amount DECIMAL(10, 2) NOT NULL,
-                        description TEXT,
-                        date DATE NOT NULL,
-                        user_id INT NOT NULL,
-                        category_id INT NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-                        FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE CASCADE
-                    )
-                ''')
-                
-                connection.commit()
-                print("Database initialized successfully")
-            except Exception as e:
-                print(f"Error initializing database: {e}")
-            finally:
-                if 'cursor' in locals():
-                    cursor.close()
-                if connection:
-                    connection.close()
-    except Error as e:
-        print(f"Error connecting to MySQL: {e}")
-        return None
+            connection.close()
 
 # Initialize database
 init_db()
@@ -372,53 +380,115 @@ def register_page():
 @login_required
 def transactions():
     connection = get_db_connection()
-    if connection:
-        try:
-            cursor = connection.cursor(dictionary=True)
-            
-            if request.method == 'POST':
+    if not connection:
+        flash('Database connection error', 'danger')
+        return redirect(url_for('index'))
+    
+    try:
+        cursor = connection.cursor(dictionary=True)
+        
+        if request.method == 'POST':
+            try:
                 amount = float(request.form['amount'])
                 description = request.form['description']
                 date = request.form['date']
                 category_id = int(request.form['category_id'])
                 
+                if amount <= 0:
+                    flash('Amount must be greater than 0', 'danger')
+                    return redirect(url_for('transactions'))
+                
+                if not description.strip():
+                    flash('Description cannot be empty', 'danger')
+                    return redirect(url_for('transactions'))
+                
+                # Verify category exists and belongs to user
+                cursor.execute('''
+                    SELECT id FROM categories 
+                    WHERE id = %s AND user_id = %s
+                ''', (category_id, current_user.id))
+                if not cursor.fetchone():
+                    flash('Invalid category selected', 'danger')
+                    return redirect(url_for('transactions'))
+                
+                # Add the transaction
                 cursor.execute('''
                     INSERT INTO transactions (amount, description, date, user_id, category_id)
                     VALUES (%s, %s, %s, %s, %s)
                 ''', (amount, description, date, current_user.id, category_id))
                 
+                # Check for budget alerts
+                cursor.execute('''
+                    SELECT bg.*, c.name as category_name
+                    FROM budget_goals bg
+                    JOIN categories c ON bg.category_id = c.id
+                    WHERE bg.category_id = %s AND bg.user_id = %s
+                ''', (category_id, current_user.id))
+                budget_goal = cursor.fetchone()
+                
+                if budget_goal:
+                    # Calculate total spending for the period
+                    if budget_goal['period'] == 'daily':
+                        date_filter = 'DATE(date) = DATE(%s)'
+                    elif budget_goal['period'] == 'weekly':
+                        date_filter = 'YEARWEEK(date) = YEARWEEK(%s)'
+                    elif budget_goal['period'] == 'monthly':
+                        date_filter = 'YEAR(date) = YEAR(%s) AND MONTH(date) = MONTH(%s)'
+                    else:  # yearly
+                        date_filter = 'YEAR(date) = YEAR(%s)'
+                    
+                    cursor.execute(f'''
+                        SELECT COALESCE(SUM(amount), 0) as total_spent
+                        FROM transactions
+                        WHERE user_id = %s 
+                        AND category_id = %s
+                        AND {date_filter}
+                    ''', (date, current_user.id, category_id))
+                    result = cursor.fetchone()
+                    total_spent = result['total_spent'] if result else 0
+                    
+                    # Check if budget is exceeded
+                    if total_spent > budget_goal['target_amount']:
+                        amount_exceeded = total_spent - budget_goal['target_amount']
+                        flash(f'Budget Alert! You have exceeded your {budget_goal["period"]} budget for {budget_goal["category_name"]} by ₹{amount_exceeded:.2f}', 'warning')
+                
                 connection.commit()
                 flash('Transaction added successfully!', 'success')
                 return redirect(url_for('transactions'))
-            
-            # Get categories for the dropdown
-            cursor.execute('SELECT * FROM categories WHERE user_id = %s', (current_user.id,))
-            categories = cursor.fetchall()
-            
-            # Get transactions
-            cursor.execute('''
-                SELECT t.*, c.name as category_name, c.type as category_type
-                FROM transactions t
-                JOIN categories c ON t.category_id = c.id
-                WHERE t.user_id = %s
-                ORDER BY t.date DESC
-            ''', (current_user.id,))
-            transactions = cursor.fetchall()
-            
-            return render_template('transactions.html', transactions=transactions, categories=categories)
-            
-        except Exception as e:
-            print(f"Error in transactions route: {e}")
-            flash('An error occurred. Please try again.', 'error')
-            return redirect(url_for('dashboard'))
-        finally:
-            if 'cursor' in locals():
-                cursor.close()
-            if connection:
-                connection.close()
-    else:
-        flash('Database connection error. Please try again later.', 'error')
-        return redirect(url_for('dashboard'))
+                
+            except ValueError:
+                flash('Invalid input format. Please check your entries.', 'danger')
+                return redirect(url_for('transactions'))
+            except Exception as e:
+                print(f"Error adding transaction: {str(e)}")
+                flash(f'Error adding transaction: {str(e)}', 'danger')
+                return redirect(url_for('transactions'))
+        
+        # Get categories for the dropdown
+        cursor.execute('SELECT * FROM categories WHERE user_id = %s', (current_user.id,))
+        categories = cursor.fetchall()
+        
+        # Get transactions
+        cursor.execute('''
+            SELECT t.*, c.name as category_name, c.type as category_type
+            FROM transactions t
+            JOIN categories c ON t.category_id = c.id
+            WHERE t.user_id = %s
+            ORDER BY t.date DESC
+        ''', (current_user.id,))
+        transactions = cursor.fetchall()
+        
+        return render_template('transactions.html', transactions=transactions, categories=categories)
+        
+    except Exception as e:
+        print(f"Error in transactions route: {str(e)}")
+        flash(f'Error: {str(e)}', 'danger')
+        return redirect(url_for('index'))
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
 
 @app.route('/notifications')
 @login_required
@@ -809,6 +879,159 @@ def dashboard():
     else:
         flash('Database connection error. Please try again later.', 'error')
         return redirect(url_for('index'))
+
+@app.route('/budget', methods=['GET', 'POST'])
+@login_required
+def budget():
+    connection = None
+    cursor = None
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+        
+        if request.method == 'POST':
+            category_id = request.form.get('category_id')
+            target_amount = request.form.get('target_amount')
+            period = request.form.get('period')
+            
+            if not category_id or not target_amount or not period:
+                flash('Please fill in all fields', 'error')
+                return redirect(url_for('budget'))
+            
+            try:
+                target_amount = float(target_amount)
+                if target_amount <= 0:
+                    flash('Target amount must be greater than 0', 'error')
+                    return redirect(url_for('budget'))
+            except ValueError:
+                flash('Invalid target amount', 'error')
+                return redirect(url_for('budget'))
+            
+            # Insert or update the budget goal
+            cursor.execute('''
+                INSERT INTO budget_goals (user_id, category_id, target_amount, period)
+                VALUES (%s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE target_amount = %s, period = %s
+            ''', (current_user.id, category_id, target_amount, period, target_amount, period))
+            
+            connection.commit()
+            flash('Budget goal set successfully!', 'success')
+            return redirect(url_for('budget'))
+        
+        # Get all categories with their goals and spending
+        cursor.execute('''
+            SELECT c.id, c.name, 
+                   COALESCE(g.target_amount, 0) as target_amount,
+                   COALESCE(g.period, 'monthly') as period,
+                   COALESCE(SUM(t.amount), 0) as spent,
+                   MIN(t.date) as first_transaction,
+                   MAX(t.date) as last_transaction
+            FROM categories c
+            LEFT JOIN budget_goals g ON c.id = g.category_id AND g.user_id = %s
+            LEFT JOIN transactions t ON c.id = t.category_id AND t.user_id = %s
+            WHERE c.user_id = %s
+            GROUP BY c.id, c.name, g.target_amount, g.period
+            ORDER BY c.name
+        ''', (current_user.id, current_user.id, current_user.id))
+        
+        categories = cursor.fetchall()
+        
+        # Calculate remaining budget and percentage for each category
+        for category in categories:
+            category['remaining'] = category['target_amount'] - category['spent']
+            if category['target_amount'] > 0:
+                # Calculate actual percentage for notifications
+                actual_percentage = (category['spent'] / category['target_amount']) * 100
+                # Cap the percentage at 100% for the progress bar
+                category['percentage'] = min(100, actual_percentage)
+                
+                # Calculate date range based on period
+                today = datetime.now().date()
+                if category['period'] == 'weekly':
+                    # Get the start of the current week (Monday)
+                    start_of_week = today - timedelta(days=today.weekday())
+                    end_of_week = start_of_week + timedelta(days=6)
+                    category['date_range'] = f"{start_of_week.strftime('%d %b')} - {end_of_week.strftime('%d %b %Y')}"
+                elif category['period'] == 'monthly':
+                    start_of_month = today.replace(day=1)
+                    end_of_month = (start_of_month + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+                    category['date_range'] = f"{start_of_month.strftime('%d %b')} - {end_of_month.strftime('%d %b %Y')}"
+                elif category['period'] == 'yearly':
+                    start_of_year = today.replace(month=1, day=1)
+                    end_of_year = today.replace(month=12, day=31)
+                    category['date_range'] = f"{start_of_year.strftime('%d %b %Y')} - {end_of_year.strftime('%d %b %Y')}"
+                else:  # daily
+                    category['date_range'] = today.strftime('%d %b %Y')
+                
+                # Add fun notifications based on budget usage
+                if actual_percentage >= 90:
+                    messages_90 = [
+                        '90% ho gaya! Budget bol raha hai—"It\'s not you, it\'s me... being totally khali!"',
+                        '90%?! Party ruko, warna EMI bhi naraaz ho jayegi!',
+                        '90%?! Budget ki haalat dekh ke toh UPI bhi sharma jayega!',
+                        '90%?! Ab toh budget bhi bol raha hai "Main jaa raha hoon, tum sambhal lo!"'
+                    ]
+                    exceeded = category['spent'] - category['target_amount']
+                    flash(f'Budget Alert! {random.choice(messages_90)} You\'ve exceeded your {category["period"]} budget ({category["date_range"]}) by ₹{exceeded:.2f}!', 'warning')
+                elif actual_percentage >= 80:
+                    messages_80 = [
+                        '80%?! Paisa uda jaise dil uda swipe karte waqt!',
+                        '80%?! Budget dekh ke toh credit card bhi piche hat gaya!',
+                        '80%?! Thoda brake maar yaar, warna savings ka breakup ho jayega!',
+                        '80%?! Budget ki haalat dekh ke toh piggy bank bhi ro padegi!'
+                    ]
+                    exceeded = category['spent'] - category['target_amount']
+                    flash(f'Budget Alert! {random.choice(messages_80)} You\'ve exceeded your {category["period"]} budget ({category["date_range"]}) by ₹{exceeded:.2f}!', 'warning')
+                elif actual_percentage >= 50:
+                    messages_50 = [
+                        'Arey waah, aadha budget uda diya! Date pe jaise kharcha—controlled but thoda naughty.',
+                        '50% ho gaya! Budget dekh raha hai tumhe—thoda sambhal ja!',
+                        'Aadha budget gaya... jaise dil gaya jab tumne bina soche kharcha kiya!',
+                        '50%?! Thoda slow karo yaar, warna savings ka mood kharab ho jayega!'
+                    ]
+                    flash(f'Budget Alert! {random.choice(messages_50)} You\'ve spent ₹{category["spent"]:.2f} out of ₹{category["target_amount"]:.2f} for {category["period"]} ({category["date_range"]})', 'info')
+            else:
+                category['percentage'] = 0
+                category['date_range'] = ''
+        
+        return render_template('budget.html', categories=categories)
+        
+    except Exception as e:
+        print(f"Error in budget route: {str(e)}")
+        flash('An error occurred while processing your request', 'error')
+        return redirect(url_for('budget'))
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+@app.route('/api/budget/<int:category_id>', methods=['DELETE'])
+@login_required
+def delete_budget(category_id):
+    connection = None
+    cursor = None
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor()
+        
+        # Delete the budget goal
+        cursor.execute('''
+            DELETE FROM budget_goals 
+            WHERE user_id = %s AND category_id = %s
+        ''', (current_user.id, category_id))
+        
+        connection.commit()
+        return '', 204
+        
+    except Exception as e:
+        print(f"Error deleting budget: {str(e)}")
+        return jsonify({'error': 'Failed to delete budget goal'}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
 
 if __name__ == '__main__':
     app.run(debug=True) 

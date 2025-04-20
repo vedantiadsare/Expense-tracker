@@ -1,90 +1,192 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
 from flask_login import login_required, current_user
-from models import Transaction, Category
+from app import get_db_connection
 from datetime import datetime
 
-finance_bp = Blueprint('finance', __name__)
+finance = Blueprint('finance', __name__)
 
-# Category routes
-@finance_bp.route('/categories', methods=['GET'])
+@finance.route('/transactions', methods=['GET', 'POST'])
 @login_required
-def get_categories():
-    categories = Category.get_by_user(current_user.id)
-    return jsonify(categories), 200
+def transactions():
+    connection = get_db_connection()
+    if not connection:
+        flash('Database connection error', 'danger')
+        return redirect(url_for('index'))
+    
+    try:
+        cursor = connection.cursor(dictionary=True)
+        
+        if request.method == 'POST':
+            amount = float(request.form.get('amount', 0))
+            description = request.form.get('description', '').strip()
+            date = request.form.get('date')
+            category_id = int(request.form.get('category_id', 0))
+            
+            if not all([amount, description, date, category_id]):
+                flash('Please fill in all fields', 'danger')
+                return redirect(url_for('finance.transactions'))
+            
+            cursor.execute('''
+                INSERT INTO transactions (amount, description, date, user_id, category_id)
+                VALUES (%s, %s, %s, %s, %s)
+            ''', (amount, description, date, current_user.id, category_id))
+            connection.commit()
+            flash('Transaction added successfully!', 'success')
+            return redirect(url_for('finance.transactions'))
+        
+        # Get categories for dropdown
+        cursor.execute('SELECT * FROM categories WHERE user_id = %s ORDER BY name', (current_user.id,))
+        categories = cursor.fetchall()
+        
+        # Get transactions
+        cursor.execute('''
+            SELECT t.*, c.name as category_name, c.type as category_type
+            FROM transactions t
+            JOIN categories c ON t.category_id = c.id
+            WHERE t.user_id = %s
+            ORDER BY t.date DESC
+        ''', (current_user.id,))
+        transactions = cursor.fetchall()
+        
+        return render_template('transactions.html', transactions=transactions, categories=categories)
+        
+    except Exception as e:
+        flash('An error occurred', 'danger')
+        return redirect(url_for('index'))
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        connection.close()
 
-@finance_bp.route('/categories', methods=['POST'])
+@finance.route('/categories', methods=['GET', 'POST'])
 @login_required
-def create_category():
-    data = request.get_json()
+def categories():
+    connection = get_db_connection()
+    if not connection:
+        flash('Database connection error', 'danger')
+        return redirect(url_for('index'))
     
-    if not all(k in data for k in ['name', 'type']):
-        return jsonify({'error': 'Missing required fields'}), 400
-    
-    if data['type'] not in ['income', 'expense']:
-        return jsonify({'error': 'Invalid category type'}), 400
-    
-    category_data = Category.create(
-        name=data['name'],
-        type=data['type'],
-        user_id=current_user.id
-    )
-    
-    return jsonify(category_data), 201
+    try:
+        cursor = connection.cursor(dictionary=True)
+        
+        if request.method == 'POST':
+            name = request.form.get('name', '').strip()
+            category_type = request.form.get('type')
+            
+            if not all([name, category_type]):
+                flash('Please fill in all fields', 'danger')
+                return redirect(url_for('finance.categories'))
+            
+            cursor.execute('''
+                INSERT INTO categories (name, type, user_id)
+                VALUES (%s, %s, %s)
+            ''', (name, category_type, current_user.id))
+            connection.commit()
+            flash('Category added successfully!', 'success')
+            return redirect(url_for('finance.categories'))
+        
+        cursor.execute('''
+            SELECT * FROM categories 
+            WHERE user_id = %s 
+            ORDER BY type, name
+        ''', (current_user.id,))
+        categories = cursor.fetchall()
+        
+        return render_template('categories.html', categories=categories)
+        
+    except Exception as e:
+        flash('An error occurred', 'danger')
+        return redirect(url_for('index'))
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        connection.close()
 
-# Transaction routes
-@finance_bp.route('/transactions', methods=['GET'])
+@finance.route('/dashboard')
 @login_required
-def get_transactions():
-    transactions = Transaction.get_by_user(current_user.id)
-    return jsonify(transactions), 200
-
-@finance_bp.route('/transactions', methods=['POST'])
-@login_required
-def create_transaction():
-    data = request.get_json()
+def dashboard():
+    connection = get_db_connection()
+    if not connection:
+        flash('Database connection error', 'danger')
+        return redirect(url_for('index'))
     
-    if not all(k in data for k in ['amount', 'type', 'category_id']):
-        return jsonify({'error': 'Missing required fields'}), 400
-    
-    if data['type'] not in ['income', 'expense']:
-        return jsonify({'error': 'Invalid transaction type'}), 400
-    
-    # Verify category belongs to user
-    category = Category.get_by_id(data['category_id'])
-    if not category or category['user_id'] != current_user.id:
-        return jsonify({'error': 'Category not found'}), 404
-    
-    transaction_data = Transaction.create(
-        amount=data['amount'],
-        description=data.get('description', ''),
-        type=data['type'],
-        category_id=data['category_id'],
-        user_id=current_user.id,
-        date=datetime.fromisoformat(data['date']) if 'date' in data else None
-    )
-    
-    return jsonify(transaction_data), 201
-
-@finance_bp.route('/transactions/<transaction_id>', methods=['DELETE'])
-@login_required
-def delete_transaction(transaction_id):
-    transaction = Transaction.get_by_id(transaction_id)
-    
-    if not transaction or transaction['user_id'] != current_user.id:
-        return jsonify({'error': 'Transaction not found'}), 404
-    
-    Transaction.delete(transaction_id)
-    return jsonify({'message': 'Transaction deleted successfully'}), 200
-
-@finance_bp.route('/summary', methods=['GET'])
-@login_required
-def get_summary():
-    # Get date range from query parameters
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    
-    start_date = datetime.fromisoformat(start_date) if start_date else None
-    end_date = datetime.fromisoformat(end_date) if end_date else None
-    
-    summary = Transaction.get_summary(current_user.id, start_date, end_date)
-    return jsonify(summary), 200 
+    try:
+        cursor = connection.cursor(dictionary=True)
+        
+        # Get total income and expenses
+        cursor.execute('''
+            SELECT 
+                SUM(CASE WHEN c.type = 'income' THEN t.amount ELSE 0 END) as total_income,
+                SUM(CASE WHEN c.type = 'expense' THEN t.amount ELSE 0 END) as total_expenses
+            FROM transactions t
+            JOIN categories c ON t.category_id = c.id
+            WHERE t.user_id = %s
+        ''', (current_user.id,))
+        totals = cursor.fetchone()
+        
+        # Get monthly data for charts
+        cursor.execute('''
+            SELECT 
+                DATE_FORMAT(t.date, '%%Y-%%m') as month,
+                SUM(CASE WHEN c.type = 'income' THEN t.amount ELSE 0 END) as income,
+                SUM(CASE WHEN c.type = 'expense' THEN t.amount ELSE 0 END) as expenses
+            FROM transactions t
+            JOIN categories c ON t.category_id = c.id
+            WHERE t.user_id = %s
+            GROUP BY DATE_FORMAT(t.date, '%%Y-%%m')
+            ORDER BY month DESC
+            LIMIT 12
+        ''', (current_user.id,))
+        monthly_data = cursor.fetchall()
+        
+        # Get recent transactions
+        cursor.execute('''
+            SELECT t.*, c.name as category_name, c.type as category_type
+            FROM transactions t
+            JOIN categories c ON t.category_id = c.id
+            WHERE t.user_id = %s
+            ORDER BY t.date DESC
+            LIMIT 5
+        ''', (current_user.id,))
+        recent_transactions = cursor.fetchall()
+        
+        # Get category breakdown
+        cursor.execute('''
+            SELECT 
+                c.name,
+                c.type,
+                SUM(t.amount) as total,
+                COUNT(*) as count,
+                (SUM(t.amount) / (
+                    SELECT SUM(amount) 
+                    FROM transactions t2 
+                    JOIN categories c2 ON t2.category_id = c2.id 
+                    WHERE t2.user_id = %s AND c2.type = c.type
+                )) * 100 as percentage
+            FROM transactions t
+            JOIN categories c ON t.category_id = c.id
+            WHERE t.user_id = %s
+            GROUP BY c.id, c.name, c.type
+            HAVING total > 0
+            ORDER BY total DESC
+        ''', (current_user.id, current_user.id))
+        categories = cursor.fetchall()
+        
+        # Separate income and expense categories
+        income_categories = [c for c in categories if c['type'] == 'income']
+        expense_categories = [c for c in categories if c['type'] == 'expense']
+        
+        return render_template('dashboard.html',
+                            totals=totals,
+                            monthly_data=monthly_data,
+                            recent_transactions=recent_transactions,
+                            income_categories=income_categories,
+                            expense_categories=expense_categories)
+        
+    except Exception as e:
+        flash('An error occurred', 'danger')
+        return redirect(url_for('index'))
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        connection.close() 
