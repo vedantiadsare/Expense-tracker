@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4">
+    <h2 class="mb-4">Savings Suggestions (AI Powered)</h2>
+    <pre style="background-color: #f8f9fa; padding: 20px; border-radius: 8px;">{{ suggestions }}</pre>
+    <a href="{{ url_for('transactions') }}" class="btn btn-primary mt-3">← Back to Transactions</a>
+</div>
+{% endblock %}

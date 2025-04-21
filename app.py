@@ -7,6 +7,11 @@ from dotenv import load_dotenv
 import mysql.connector
 from mysql.connector import Error
 import random
+from flask import Response
+import io
+import csv
+from gemini_helper import analyze_transactions_csv
+import os, csv
 
 # Load environment variables
 load_dotenv()
@@ -226,8 +231,7 @@ def register_page():
                     (username, email, hashed_password, datetime.utcnow())
                 )
                 connection.commit()
-                
-                # Get the user ID of the newly created user
+                                # Get the user ID of the newly created user
                 user_id = cursor.lastrowid
                 
                 # Add default categories for the new user
@@ -832,7 +836,7 @@ def dashboard():
                 LIMIT 5
             ''', (current_user.id,))
             recent_transactions = cursor.fetchall()
-            
+        
             # Get category breakdown
             cursor.execute('''
                 SELECT 
@@ -1032,6 +1036,106 @@ def delete_budget(category_id):
             cursor.close()
         if connection:
             connection.close()
+
+
+@app.route('/export-csv', methods=['GET'])
+@login_required
+def export_csv():
+    connection = get_db_connection()
+    if not connection:
+        flash('Database connection error', 'danger')
+        return redirect(url_for('transactions'))
+    
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute('''
+            SELECT t.amount, t.description, t.date, c.name as category_name, c.type as category_type
+            FROM transactions t
+            JOIN categories c ON t.category_id = c.id
+            WHERE t.user_id = %s
+            ORDER BY t.date DESC
+        ''', (current_user.id,))
+        transactions = cursor.fetchall()
+
+        # Create CSV in memory
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['Date', 'Amount', 'Description', 'Category', 'Type'])  # Header
+
+        for txn in transactions:
+            writer.writerow([
+                txn['date'].strftime('%Y-%m-%d') if txn['date'] else '',
+                txn['amount'],
+                txn['description'],
+                txn['category_name'],
+                txn['category_type']
+            ])
+
+        output.seek(0)
+
+        return Response(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={'Content-Disposition': 'attachment; filename=transactions.csv'}
+        )
+    except Exception as e:
+        print(f"Error exporting CSV: {str(e)}")
+        flash('Error exporting CSV file.', 'danger')
+        return redirect(url_for('transactions'))
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+@app.route('/suggestions')
+@login_required
+def suggestions():
+    connection = get_db_connection()
+    if not connection:
+        flash('Database connection error', 'danger')
+        return redirect(url_for('transactions'))
+
+    try:
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute('''
+            SELECT t.amount, t.description, t.date, c.name as category
+            FROM transactions t
+            JOIN categories c ON t.category_id = c.id
+            WHERE t.user_id = %s
+            ORDER BY t.date DESC
+        ''', (current_user.id,))
+        transactions = cursor.fetchall()
+
+        # Save CSV
+        
+        filename = f"transactions_{current_user.id}.csv"
+        filepath = os.path.join("temp", filename)
+        os.makedirs("temp", exist_ok=True)
+
+        with open(filepath, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(['Amount', 'Description', 'Date', 'Category'])
+            for tx in transactions:
+                writer.writerow([tx['amount'], tx['description'], tx['date'], tx['category']])
+
+        # Analyze with Gemini
+        
+        suggestions = analyze_transactions_csv(filepath)
+
+        os.remove(filepath)  # Clean up
+
+        return render_template('suggestions.html', suggestions=suggestions)
+
+    except Exception as e:
+        print("Error analyzing transactions:", str(e))
+        flash("Failed to analyze transactions.", "danger")
+        return redirect(url_for('transactions'))
+    finally:
+        cursor.close()
+        connection.close()
+
 
 if __name__ == '__main__':
     app.run(debug=True) 
