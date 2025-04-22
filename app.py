@@ -12,6 +12,8 @@ import io
 import csv
 from gemini_helper import analyze_transactions_csv
 import os, csv
+import traceback
+
 
 # Load environment variables
 load_dotenv()
@@ -1114,16 +1116,27 @@ def suggestions():
         filepath = os.path.join("temp", filename)
         os.makedirs("temp", exist_ok=True)
 
-        with open(filepath, 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(['Amount', 'Description', 'Date', 'Category'])
-            for tx in transactions:
-                writer.writerow([tx['amount'], tx['description'], tx['date'], tx['category']])
-
-        # Analyze with Gemini
+        try:
+            with open(filepath, 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(['Amount', 'Description', 'Date', 'Category'])
+                for tx in transactions:
+                    writer.writerow([tx['amount'], tx['description'], tx['date'], tx['category']])
+            print(f"CSV file saved to: {os.path.abspath(filepath)}")
+            print(f"CSV file exists: {os.path.exists(filepath)}")
+        except Exception as e:
+            print("CSV writing error:", str(e))
+            flash("Failed to write transactions to CSV.", "danger")
+            return redirect(url_for('transactions'))
         
-        suggestions = analyze_transactions_csv(filepath)
-
+        try:
+            suggestions = analyze_transactions_csv(filepath)
+        except Exception as e:
+            print("Gemini analysis error:", str(e))
+            traceback.print_exc()
+            flash("Failed to analyze transactions with Gemini.", "danger")
+            return redirect(url_for('transactions'))
+                
         os.remove(filepath)  # Clean up
 
         return render_template('suggestions.html', suggestions=suggestions)

@@ -1,8 +1,22 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="container mt-4">
-    <h2 class="mb-4">Savings Suggestions (AI Powered)</h2>
-    <pre style="background-color: #f8f9fa; padding: 20px; border-radius: 8px;">{{ suggestions }}</pre>
-    <a href="{{ url_for('transactions') }}" class="btn btn-primary mt-3">← Back to Transactions</a>
+<div class="container mt-5">
+    <div class="card shadow-sm">
+        <div class="card-header bg-primary text-white">
+            <h4 class="mb-0">💡 AI-Powered Savings Suggestions</h4>
+        </div>
+        <div class="card-body" style="background-color: #fdfdfd;">
+            {% if suggestions %}
+                <div class="p-2" style="white-space: pre-line; font-family: 'Segoe UI', sans-serif; font-size: 1rem; color: #333;">
+                    {{ suggestions }}
+                </div>
+            {% else %}
+                <p class="text-muted">No suggestions available at the moment.</p>
+            {% endif %}
+        </div>
+        <div class="card-footer text-end">
+            <a href="{{ url_for('transactions') }}" class="btn btn-outline-primary">← Back to Transactions</a>
+        </div>
+    </div>
 </div>
 {% endblock %}
